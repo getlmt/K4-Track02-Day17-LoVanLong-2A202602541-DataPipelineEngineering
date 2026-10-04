@@ -18,6 +18,7 @@ real model (swap in any provider via .env if you like — the pipeline is the sa
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
@@ -80,14 +81,57 @@ def live_tickets(con: duckdb.DuckDBPyConnection) -> list[tuple[str, str]]:
     """).fetchall()
 
 
+def cache_key(prompt: str) -> str:
+    """hash(input) + model + prompt version: change any of the three -> a new key."""
+    return hashlib.sha256(f"{MODEL}|{PROMPT_VERSION}|{prompt}".encode("utf-8")).hexdigest()
+
+
 def label_tickets(con: duckdb.DuckDBPyConnection, llm: FakeLLM) -> dict:
-    """NAIVE version (shipped): one LLM call per ticket per run, no validation."""
-    rows = []
+    """Cached + validated LLM step.
+
+    1. look every ticket up in llm_label_cache by cache_key(prompt)
+    2. estimate the cost of the misses BEFORE calling the model
+    3. call the model only for misses; cache the raw answer (valid or not),
+       so a re-run with the same model + prompt makes 0 calls
+    4. validate: allowed label -> gold_ticket_labels, anything else -> llm_label_quarantine
+    """
+    con.execute("""CREATE TABLE IF NOT EXISTS llm_label_cache (
+        cache_key VARCHAR, model VARCHAR, prompt_version VARCHAR, raw_answer VARCHAR)""")
+    todo = []
     for ticket_id, text in live_tickets(con):
-        raw = llm.complete(PROMPT_TEMPLATE.format(text=text))
-        rows.append((ticket_id, raw, MODEL, PROMPT_VERSION))
+        prompt = PROMPT_TEMPLATE.format(text=text)
+        todo.append((ticket_id, text, prompt, cache_key(prompt)))
+    cached = dict(con.execute(
+        "SELECT cache_key, raw_answer FROM llm_label_cache WHERE model = ? AND prompt_version = ?",
+        [MODEL, PROMPT_VERSION]).fetchall())
+    misses = [t for t in todo if t[3] not in cached]
+    est_tokens = estimate_tokens([text for _, text, _, _ in misses])
+
+    calls_before = llm.calls
+    for _, _, prompt, key in misses:
+        if key in cached:                  # two tickets with the same text: one call
+            continue
+        raw = llm.complete(prompt)
+        con.execute("INSERT INTO llm_label_cache VALUES (?, ?, ?, ?)",
+                    [key, MODEL, PROMPT_VERSION, raw])
+        cached[key] = raw
+
+    good, bad = [], []
+    for ticket_id, _, _, key in todo:
+        raw = cached[key]
+        label = parse_label(raw)
+        if label is None:
+            bad.append((ticket_id, raw, MODEL, PROMPT_VERSION))
+        else:
+            good.append((ticket_id, label, MODEL, PROMPT_VERSION))
     con.execute("""CREATE OR REPLACE TABLE gold_ticket_labels (
         ticket_id VARCHAR, label VARCHAR, model VARCHAR, prompt_version VARCHAR)""")
-    if rows:
-        con.executemany("INSERT INTO gold_ticket_labels VALUES (?, ?, ?, ?)", rows)
-    return {"labeled": len(rows), "calls": llm.calls}
+    con.execute("""CREATE OR REPLACE TABLE llm_label_quarantine (
+        ticket_id VARCHAR, raw_answer VARCHAR, model VARCHAR, prompt_version VARCHAR)""")
+    if good:
+        con.executemany("INSERT INTO gold_ticket_labels VALUES (?, ?, ?, ?)", good)
+    if bad:
+        con.executemany("INSERT INTO llm_label_quarantine VALUES (?, ?, ?, ?)", bad)
+    return {"labeled": len(good), "quarantined": len(bad), "calls": llm.calls - calls_before,
+            "estimated_tokens": est_tokens,
+            "estimated_cost_usd": est_tokens / 1000 * PRICE_PER_1K_TOKENS_USD}
