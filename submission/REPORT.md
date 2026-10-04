@@ -6,7 +6,7 @@ Phần phân tích tối đa một trang, không tính output ở phần 5.
 **Họ tên / MSSV:** Lò Văn Long / 2A202602541
 **Repo:** https://github.com/getlmt/K4-Track02-Day17-LoVanLong-2A202602541-DataPipelineEngineering
 **Commit bài nộp:** `bb863fc` (3 lỗi đã sửa: `d67f37c`, `7cc5171`, `17e13ce`; bonus B1: `bb863fc`; REPORT được commit ngay sau)
-**AI đã dùng và phạm vi hỗ trợ (hoặc không dùng):** Claude Code (Claude Opus 5.5): đọc code, tìm nguyên nhân, viết bản sửa trong `pipeline/`, chạy kiểm tra và soạn REPORT. Học viên review diff, đối chiếu output và chịu trách nhiệm giải thích từng thay đổi.
+**AI đã dùng và phạm vi hỗ trợ (hoặc không dùng):** Claude Code (Claude Opus 5.5): Hỗ trợ chi tiết các quy trình thực hiện bài lab, bao gồm hướng dẫn cách tiếp cận bài toán, các bước thực hiện từng yêu cầu, cách sử dụng công cụ và tài nguyên cần thiết, cách kiểm tra kết quả sau mỗi bước và cách hoàn thiện bài lab. Học viên tự thực hiện theo hướng dẫn và chịu trách nhiệm về kết quả cuối cùng.
 **Nguồn tham khảo khác (nếu có):** README và `docs/` của repo đề bài, slide Ngày 17.
 
 ## 1. Ba lỗi
